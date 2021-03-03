@@ -374,3 +374,68 @@ func TestWritePSIData(t *testing.T) {
 		})
 	}
 }
+
+func TestIsLastPSISection(t *testing.T) {
+	tests := []struct {
+		name      string
+		bytesFunc func() []byte
+		expected  bool
+	}{
+		{
+			"no pointer, section 2/3",
+			func() []byte {
+				buf := &bytes.Buffer{}
+				w := astikit.NewBitsWriter(astikit.BitsWriterOptions{Writer: buf})
+				w.Write(uint8(0))       // Pointer field
+				w.Write(uint8(0))       // Table ID
+				w.Write("1011")         // Section syntax indicator, zero bit and reserved
+				w.WriteN(uint16(0), 12) // Section length
+				w.Write(uint16(1))      // Table ID extension
+				w.Write("11101011")     // Reserved bits, Version number, Current/next indicator
+				w.Write(uint8(2))       // Section number
+				w.Write(uint8(3))       // Last section number
+				return buf.Bytes()
+			},
+			false,
+		}, {
+			"no pointer, section 0/0",
+			func() []byte {
+				buf := &bytes.Buffer{}
+				w := astikit.NewBitsWriter(astikit.BitsWriterOptions{Writer: buf})
+				w.Write(uint8(0))       // Pointer field
+				w.Write(uint8(0))       // Table ID
+				w.Write("1011")         // Section syntax indicator, zero bit and reserved
+				w.WriteN(uint16(0), 12) // Section length
+				w.Write(uint16(1))      // Table ID extension
+				w.Write("11101011")     // Reserved bits, Version number, Current/next indicator
+				w.Write(uint8(0))       // Section number
+				w.Write(uint8(0))       // Last section number
+				return buf.Bytes()
+			},
+			true,
+		}, {
+			"pointer, section 3/3",
+			func() []byte {
+				buf := &bytes.Buffer{}
+				w := astikit.NewBitsWriter(astikit.BitsWriterOptions{Writer: buf})
+				w.Write(uint8(3))        // Pointer field
+				w.Write([]byte{0, 1, 2}) // Pointer filler
+				w.Write(uint8(0))        // Table ID
+				w.Write("1011")          // section syntax indicator, zero bit and reserved
+				w.WriteN(uint16(0), 12)  // section length
+				w.Write(uint16(1))       // Table ID extension
+				w.Write("11101011")      // Reserved bits, Version number, Current/next indicator
+				w.Write(uint8(3))        // Section number
+				w.Write(uint8(3))        // Last section number
+				return buf.Bytes()
+			},
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := isLastPSISection(tt.bytesFunc())
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}

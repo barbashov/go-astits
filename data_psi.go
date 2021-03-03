@@ -373,6 +373,27 @@ func parsePSISectionSyntaxHeader(i *astikit.BytesIterator) (h *PSISectionSyntaxH
 	return
 }
 
+// this function is here to introspect incoming packets in compact way without really parsing them
+// see Demuxer.packetPoolForceFlushCb
+func isLastPSISection(packetPayload []byte) bool {
+	// pointer_field
+	pointerField := int(packetPayload[0])
+	// skip pointerField bytes, pointer_field itself and
+	skip := pointerField + 1
+	// skip 6 bytes to section_number and last_section_number fields
+	skip += 6
+
+	// if we're out of bounds, it's for sure not the last section (something's wrong, a real parser will sort it out)
+	if len(packetPayload) < skip+2 {
+		return false
+	}
+
+	packetPayload = packetPayload[skip:]
+
+	// compare section_number and last_section_number fields
+	return packetPayload[0] == packetPayload[1]
+}
+
 // parsePSISectionSyntaxData parses a PSI section data
 func parsePSISectionSyntaxData(i *astikit.BytesIterator, h *PSISectionHeader, sh *PSISectionSyntaxHeader, offsetSectionsEnd int) (d *PSISectionSyntaxData, err error) {
 	// Init

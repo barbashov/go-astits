@@ -21,15 +21,15 @@ var (
 // http://seidl.cs.vsb.cz/download/dvb/DVB_Poster.pdf
 // http://www.etsi.org/deliver/etsi_en/300400_300499/300468/01.13.01_40/en_300468v011301o.pdf
 type Demuxer struct {
-	ctx                           context.Context
-	dataBuffer                    []*Data
-	optPacketSize                 int
-	optPacketsParser              PacketsParser
-	packetBuffer                  *packetBuffer
-	packetPool                    *packetPool
-	programMap                    programMap
-	r                             io.Reader
-	optFlushPacketPoolOnPIDChange bool
+	ctx                    context.Context
+	dataBuffer             []*Data
+	optPacketSize          int
+	optPacketsParser       PacketsParser
+	packetBuffer           *packetBuffer
+	packetPool             *packetPool
+	programMap             programMap
+	r                      io.Reader
+	optUsePSIIntrospection bool
 }
 
 // PacketsParser represents an object capable of parsing a set of packets containing a unique payload spanning over those packets
@@ -50,7 +50,11 @@ func New(ctx context.Context, r io.Reader, opts ...func(*Demuxer)) (d *Demuxer) 
 		opt(d)
 	}
 
-	d.packetPool = newPacketPool(d.optFlushPacketPoolOnPIDChange)
+	if d.optUsePSIIntrospection {
+		d.packetPool = newPacketPool(d.packetPoolForceFlushCb)
+	} else {
+		d.packetPool = newPacketPool(nil)
+	}
 
 	return
 }
@@ -62,9 +66,11 @@ func OptPacketSize(packetSize int) func(*Demuxer) {
 	}
 }
 
-func OptFlushPacketPoolOnPIDChange(flag bool) func(*Demuxer) {
+// When enabled, PSI packets will get introspected and flushed from packet pool to demuxer as soon as they're ready
+// This option is necessary when demuxing TS files, i.e. HLS, to not to skip first PAT/PMT and PESes
+func OptUsePSIIntrospection(flag bool) func(*Demuxer) {
 	return func(d *Demuxer) {
-		d.optFlushPacketPoolOnPIDChange = flag
+		d.optUsePSIIntrospection = flag
 	}
 }
 
@@ -184,11 +190,27 @@ func (dmx *Demuxer) updateData(ds []*Data) (d *Data) {
 	return
 }
 
+func (dmx *Demuxer) packetPoolForceFlushCb(p *Packet) bool {
+	// if it's not a PSI payload, we don't need here it anyway
+	if !isPSIPayload(p.Header.PID, dmx.programMap) {
+		return false
+	}
+
+	// now check if it's the last section
+	return isLastPSISection(p.Payload)
+}
+
 // Rewind rewinds the demuxer reader
 func (dmx *Demuxer) Rewind() (n int64, err error) {
 	dmx.dataBuffer = []*Data{}
 	dmx.packetBuffer = nil
-	dmx.packetPool = newPacketPool(dmx.optFlushPacketPoolOnPIDChange)
+
+	if dmx.optUsePSIIntrospection {
+		dmx.packetPool = newPacketPool(dmx.packetPoolForceFlushCb)
+	} else {
+		dmx.packetPool = newPacketPool(nil)
+	}
+
 	if n, err = rewind(dmx.r); err != nil {
 		err = fmt.Errorf("astits: rewinding reader failed: %w", err)
 		return
